@@ -1,0 +1,1089 @@
+local OrionLib = loadstring(game:HttpGet('https://raw.githubusercontent.com/ShadowsHubseila/lib...-/refs/heads/main/ORIONBYME.txt'))()
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+local Settings = {
+    SoloMode = false,
+    HeadEnabled = false,
+    TorsoEnabled = false,
+    BodyEnabled = false,
+    HeadSize = 10,
+    TorsoSize = 5,
+    BodySize = 3,
+    SpawnDistance = 50,
+    UpdateInterval = 1.5
+}
+
+local inDuelsMap = false
+local mySpawnPosition = nil
+local playerSpawnPositions = {}
+local confirmedAllies = {}
+local roundStarted = false
+
+local function isInDuelsMap()
+    if not LocalPlayer.Character then return false end
+    
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local duelsFolder = Workspace:FindFirstChild("DuelsMaps")
+    if not duelsFolder then return false end
+    
+    for _, map in pairs(duelsFolder:GetChildren()) do
+        if map:IsA("Model") or map:IsA("Folder") then
+            local mapParts = map:GetDescendants()
+            for _, part in pairs(mapParts) do
+                if part:IsA("BasePart") then
+                    local distance = (rootPart.Position - part.Position).Magnitude
+                    if distance < 200 then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    
+    return false
+end
+
+local function savePlayerSpawnPosition(player)
+    if not player.Character then return end
+    
+    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    if not playerSpawnPositions[player.UserId] then
+        playerSpawnPositions[player.UserId] = rootPart.Position
+    end
+end
+
+local function isSameTeamBySpawn(player)
+    if player == LocalPlayer then return true end
+    if not mySpawnPosition then return false end
+    
+    if confirmedAllies[player.UserId] then return true end
+    
+    local playerSpawn = playerSpawnPositions[player.UserId]
+    if playerSpawn then
+        local distance = (mySpawnPosition - playerSpawn).Magnitude
+        if distance <= Settings.SpawnDistance then
+            confirmedAllies[player.UserId] = true
+            return true
+        else
+            return false
+        end
+    end
+    
+    if player.Character then
+        local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local distance = (mySpawnPosition - rootPart.Position).Magnitude
+            if distance <= Settings.SpawnDistance then
+                confirmedAllies[player.UserId] = true
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+local function isSameTeamByTeam(player)
+    if player == LocalPlayer then return true end
+    
+    if LocalPlayer.Team and player.Team then
+        return LocalPlayer.Team == player.Team
+    end
+    
+    return false
+end
+
+local function isSameTeamByColor(player)
+    if player == LocalPlayer then return true end
+    if not player.Character then return false end
+    
+    local myColor = nil
+    if LocalPlayer.Character then
+        for _, partName in pairs({"Torso", "UpperTorso", "Left Arm", "Right Arm"}) do
+            local part = LocalPlayer.Character:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                local color = part.Color
+                if color.B > 0.5 and color.R < 0.4 and color.G < 0.4 then
+                    myColor = "Blue"
+                    break
+                end
+                if color.R > 0.5 and color.G < 0.4 and color.B < 0.4 then
+                    myColor = "Red"
+                    break
+                end
+            end
+        end
+    end
+    
+    if not myColor then return false end
+    
+    for _, partName in pairs({"Torso", "UpperTorso", "Left Arm", "Right Arm"}) do
+        local part = player.Character:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            local color = part.Color
+            if myColor == "Blue" and color.B > 0.5 and color.R < 0.4 and color.G < 0.4 then
+                return true
+            end
+            if myColor == "Red" and color.R > 0.5 and color.G < 0.4 and color.B < 0.4 then
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+local function isAlly(player)
+    if player == LocalPlayer then return true end
+    
+    if Settings.SoloMode then
+        return false
+    end
+    
+    if isSameTeamBySpawn(player) then
+        return true
+    end
+    
+    if isSameTeamByTeam(player) then
+        confirmedAllies[player.UserId] = true
+        return true
+    end
+    
+    if isSameTeamByColor(player) then
+        confirmedAllies[player.UserId] = true
+        return true
+    end
+    
+    return false
+end
+
+local function resetPart(part)
+    if not part then return end
+    
+    local originalSize = part:GetAttribute("OriginalSize")
+    if originalSize then
+        pcall(function()
+            part.Size = originalSize
+            
+            local mesh = part:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.Scale = Vector3.new(1, 1, 1)
+            end
+        end)
+    end
+end
+
+local function resetCharacter(character)
+    if not character then return end
+    
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            resetPart(part)
+        end
+    end
+end
+
+local function resetAll()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            resetCharacter(player.Character)
+        end
+    end
+end
+
+local function expandHead(character)
+    if not character then return end
+    if not Settings.HeadEnabled then return end
+    
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+    
+    pcall(function()
+        if not head:GetAttribute("OriginalSize") then
+            head:SetAttribute("OriginalSize", head.Size)
+        end
+        
+        local originalSize = head:GetAttribute("OriginalSize")
+        local multiplier = Settings.HeadSize
+        
+        head.Size = Vector3.new(
+            originalSize.X * multiplier,
+            originalSize.Y * multiplier,
+            originalSize.Z * multiplier
+        )
+        
+        local mesh = head:FindFirstChildOfClass("SpecialMesh")
+        if mesh then
+            mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+        end
+        
+        head.CanCollide = false
+        head.Massless = true
+    end)
+end
+
+local function expandTorso(character)
+    if not character then return end
+    if not Settings.TorsoEnabled then return end
+    
+    local parts = {
+        character:FindFirstChild("UpperTorso"),
+        character:FindFirstChild("LowerTorso"),
+        character:FindFirstChild("Torso")
+    }
+    
+    for _, part in pairs(parts) do
+        if part then
+            pcall(function()
+                if not part:GetAttribute("OriginalSize") then
+                    part:SetAttribute("OriginalSize", part.Size)
+                end
+                
+                local originalSize = part:GetAttribute("OriginalSize")
+                local multiplier = Settings.TorsoSize
+                
+                part.Size = Vector3.new(
+                    originalSize.X * multiplier,
+                    originalSize.Y * multiplier,
+                    originalSize.Z * multiplier
+                )
+                
+                local mesh = part:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+                end
+                
+                part.CanCollide = false
+                part.Massless = true
+            end)
+        end
+    end
+end
+
+local function expandBody(character)
+    if not character then return end
+    if not Settings.BodyEnabled then return end
+    
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Name ~= "Head" then
+            pcall(function()
+                if not part:GetAttribute("OriginalSize") then
+                    part:SetAttribute("OriginalSize", part.Size)
+                end
+                
+                local originalSize = part:GetAttribute("OriginalSize")
+                local multiplier = Settings.BodySize
+                
+                part.Size = Vector3.new(
+                    originalSize.X * multiplier,
+                    originalSize.Y * multiplier,
+                    originalSize.Z * multiplier
+                )
+                
+                local mesh = part:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+                end
+                
+                part.CanCollide = false
+                part.Massless = true
+            end)
+        end
+    end
+end
+
+local function detectAllies()
+    if roundStarted then return end
+    if Settings.SoloMode then 
+        roundStarted = true
+        return 
+    end
+    
+    if LocalPlayer.Character then
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            mySpawnPosition = rootPart.Position
+            playerSpawnPositions[LocalPlayer.UserId] = mySpawnPosition
+        end
+    end
+    
+    wait(2)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            savePlayerSpawnPosition(player)
+        end
+    end
+    
+    wait(1)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            isAlly(player)
+        end
+    end
+    
+    roundStarted = true
+end
+
+local function updateAllPlayers()
+    if not inDuelsMap then return end
+    
+    if Settings.SoloMode then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                if Settings.HeadEnabled then
+                    expandHead(player.Character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(player.Character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(player.Character)
+                end
+            end
+        end
+        return
+    end
+    
+    if not roundStarted then return end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if not isAlly(player) then
+                if Settings.HeadEnabled then
+                    expandHead(player.Character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(player.Character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(player.Character)
+                end
+            end
+        end
+    end
+end
+
+local function resetState()
+    inDuelsMap = false
+    roundStarted = false
+    mySpawnPosition = nil
+    playerSpawnPositions = {}
+    confirmedAllies = {}
+    resetAll()
+end
+
+spawn(function()
+    while true do
+        wait(2)
+        
+        local wasInDuels = inDuelsMap
+        local nowInDuels = isInDuelsMap()
+        
+        if wasInDuels and not nowInDuels then
+            resetState()
+        end
+        
+        if not wasInDuels and nowInDuels then
+            inDuelsMap = true
+            roundStarted = false
+            wait(0.5)
+            detectAllies()
+            wait(1)
+            updateAllPlayers()
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    character:WaitForChild("Head")
+    wait(1)
+    
+    if isInDuelsMap() then
+        inDuelsMap = true
+        roundStarted = false
+        detectAllies()
+        updateAllPlayers()
+    end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        character:WaitForChild("Head")
+        wait(1.5)
+        
+        if inDuelsMap then
+            if Settings.SoloMode or (roundStarted and not isAlly(player)) then
+                if Settings.HeadEnabled then
+                    expandHead(character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(character)
+                end
+            end
+        end
+    end)
+end)
+
+spawn(function()
+    while true do
+        wait(Settings.UpdateInterval)
+        
+        if inDuelsMap then
+            updateAllPlayers()
+        end
+    end
+end)
+
+local Window = OrionLib:MakeWindow({
+    Name = "MM2 - Body Expander",
+    HidePremium = false,
+    SaveConfig = false,
+    IntroEnabled = false
+})
+
+local MainTab = Window:MakeTab({
+    Name = "Body Expander",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+MainTab:AddSection({Name = "Modo de Jogo"})
+
+MainTab:AddToggle({
+    Name = "Modo Solo",
+    Default = false,
+    Callback = function(Value)
+        Settings.SoloMode = Value
+        
+        if Value then
+            roundStarted = true
+            mySpawnPosition = nil
+            playerSpawnPositions = {}
+            confirmedAllies = {}
+            
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Modo Solo Ativado",
+                Content = "Todos os jogadores serao inimigos",
+                Time = 3
+            })
+        else
+            roundStarted = false
+            mySpawnPosition = nil
+            playerSpawnPositions = {}
+            confirmedAllies = {}
+            resetAll()
+            
+            if inDuelsMap then
+                detectAllies()
+                wait(1)
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Modo Aliados Ativado",
+                Content = "Detectara aliados por spawn",
+                Time = 3
+            })
+        end
+    end    
+})
+
+MainTab:AddSection({Name = "Configuracoes"})
+
+MainTab:AddToggle({
+    Name = "Aumentar Cabeca",
+    Default = false,
+    Callback = function(Value)
+        Settings.HeadEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Cabeca Ativada",
+                Content = "Cabecas aumentadas",
+                Time = 2
+            })
+        else
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    local head = player.Character:FindFirstChild("Head")
+                    if head then
+                        resetPart(head)
+                    end
+                end
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Cabeca Desativada",
+                Content = "Cabecas resetadas",
+                Time = 2
+            })
+        end
+    end    
+})
+
+MainTab:AddSlider({
+    Name = "Tamanho da Cabeca",
+    Min = 2,
+    Max = 30,
+    Default = 10,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.HeadSize = Value
+        
+        if Settings.HeadEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+MainTab:AddSection({Name = ""})
+
+MainTab:AddToggle({
+    Name = "Aumentar Tronco",
+    Default = false,
+    Callback = function(Value)
+        Settings.TorsoEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Tronco Ativado",
+                Content = "Troncos aumentados",
+                Time = 2
+            })
+        else
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    for _, partName in pairs({"Torso", "UpperTorso", "LowerTorso"}) do
+                        local part = player.Character:FindFirstChild(partName)
+                        if part then
+                            resetPart(part)
+                        end
+                    end
+                end
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Tronco Desativado",
+                Content = "Troncos resetados",
+                Time = 2
+            })
+        end
+    end    
+})
+
+MainTab:AddSlider({
+    Name = "Tamanho do Tronco",
+    Min = 2,
+    Max = 20,
+    Default = 5,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.TorsoSize = Value
+        
+        if Settings.TorsoEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+MainTab:AddSection({Name = ""})
+
+MainTab:AddToggle({
+    Name = "Aumentar Corpo Inteiro",
+    Default = false,
+    Callback = function(Value)
+        Settings.BodyEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Corpo Ativado",
+                Content = "Corpos aumentados",
+                Time = 2
+            })
+        else
+            resetAll()
+            
+            OrionLib:MakeNotification({
+                Name = "Corpo Desativado",
+                Content = "Corpos resetados",
+                Time = 2
+            })
+        end
+    end    
+})
+
+MainTab:AddSlider({
+    Name = "Tamanho do Corpo",
+    Min = 2,
+    Max = 15,
+    Default = 3,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.BodySize = Value
+        
+        if Settings.BodyEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+MainTab:AddSection({Name = "Informacoes"})
+
+MainTab:AddParagraph("Modo Solo:", "Aumenta TODOS os jogadores exceto voce. Nao detecta aliados.")
+
+MainTab:AddParagraph("Modo Aliados:", "Detecta aliados pela posicao de spawn. Quem spawnou perto = aliado. Quem spawnou longe = inimigo.")
+
+OrionLib:Init()
+
+if LocalPlayer.Character then
+    wait(2)
+    if isInDuelsMap() then
+        inDuelsMap = true
+        detectAllies()
+        updateAllPlayers()
+    end
+end
+
+-- Auto Kill System MEGA FAST
+local AutoKillSettings = {
+    Enabled = false,
+    ArenaRadius = 100,
+    FollowDistance = 2,
+    ShowTeleportEffect = true
+}
+
+local currentTarget = nil
+local myArenaCenter = nil
+local teleportCount = 0
+
+-- Equipar faca INSTANTANEAMENTE
+local function equipKnife()
+    if not LocalPlayer.Character then return nil end
+    
+    -- Verificar se já está equipado
+    for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
+        if tool:IsA("Tool") then
+            return tool
+        end
+    end
+    
+    -- Equipar da backpack INSTANTÂNEO
+    local backpack = LocalPlayer.Backpack
+    if backpack then
+        for _, tool in pairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                LocalPlayer.Character.Humanoid:EquipTool(tool)
+                return tool
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- ATACAR COM SPAM MASSIVO
+local function megaAttack()
+    local tool = equipKnife()
+    if not tool then return end
+    
+    -- SPAM 5 ATAQUES DE UMA VEZ
+    for i = 1, 5 do
+        pcall(function()
+            game:GetService("ReplicatedStorage").Remotes.Weapons.KnifeStab:FireServer(tool, tick())
+        end)
+    end
+end
+
+-- Verificar se está na minha arena
+local function isInMyArena(player)
+    if not player.Character then return false end
+    if not myArenaCenter then return false end
+    
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    
+    return (myArenaCenter - root.Position).Magnitude <= AutoKillSettings.ArenaRadius
+end
+
+-- Verificar se está vivo
+local function isAlive(player)
+    if not player.Character then return false end
+    local humanoid = player.Character:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+-- Pegar melhor alvo INSTANTÂNEO
+local function getBestTarget()
+    if not LocalPlayer.Character then return nil end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    
+    local bestTarget = nil
+    local shortestDistance = math.huge
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isAlive(player) then
+            -- Verificar se é inimigo (não aliado)
+            local isEnemy = true
+            if not Settings.SoloMode then
+                if myArenaCenter then
+                    local playerSpawn = playerSpawnPositions[player.UserId]
+                    if playerSpawn then
+                        local spawnDistance = (myArenaCenter - playerSpawn).Magnitude
+                        if spawnDistance <= Settings.SpawnDistance then
+                            isEnemy = false
+                        end
+                    end
+                end
+            end
+            
+            if isEnemy and isInMyArena(player) then
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local distance = (myRoot.Position - root.Position).Magnitude
+                    if distance < shortestDistance then
+                        bestTarget = player
+                        shortestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+    
+    return bestTarget
+end
+
+-- LOOPGOTO - TP INSTANTÂNEO COM EFEITO VISUAL
+local function loopGotoTarget(target)
+    if not target or not target.Character then return false end
+    if not LocalPlayer.Character then return false end
+    
+    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    
+    if targetRoot and myRoot then
+        -- TELEPORTAR
+        myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, AutoKillSettings.FollowDistance)
+        teleportCount = teleportCount + 1
+        
+        -- EFEITO VISUAL (opcional)
+        if AutoKillSettings.ShowTeleportEffect then
+            local highlight = Instance.new("Highlight")
+            highlight.Parent = LocalPlayer.Character
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+            highlight.FillTransparency = 0.5
+            game:GetService("Debris"):AddItem(highlight, 0.1)
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+-- LOOP PRINCIPAL - MEGA VELOCIDADE
+spawn(function()
+    while true do
+        if AutoKillSettings.Enabled then
+            -- Atualizar centro da arena IMEDIATAMENTE
+            if not myArenaCenter and LocalPlayer.Character then
+                local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    myArenaCenter = root.Position
+                end
+            end
+            
+            -- Buscar e atacar
+            if LocalPlayer.Character then
+                currentTarget = getBestTarget()
+                
+                if currentTarget then
+                    equipKnife()
+                    loopGotoTarget(currentTarget)
+                    megaAttack()
+                end
+            end
+        else
+            currentTarget = nil
+            myArenaCenter = nil
+            teleportCount = 0
+        end
+        
+        task.wait()
+    end
+end)
+
+-- LOOP DE ATAQUE SEPARADO - SPAM INFINITO
+spawn(function()
+    while true do
+        if AutoKillSettings.Enabled and currentTarget and isAlive(currentTarget) then
+            megaAttack()
+        end
+        task.wait()
+    end
+end)
+
+-- LOOP DE LOOPGOTO SEPARADO - COLA NO ALVO
+spawn(function()
+    while true do
+        if AutoKillSettings.Enabled and currentTarget and isAlive(currentTarget) then
+            loopGotoTarget(currentTarget)
+        end
+        task.wait()
+    end
+end)
+
+-- LOOP DE EQUIPAR SEPARADO - SEMPRE EQUIPADO
+spawn(function()
+    while true do
+        if AutoKillSettings.Enabled then
+            equipKnife()
+        end
+        task.wait()
+    end
+end)
+
+-- Resetar ao respawnar
+LocalPlayer.CharacterAdded:Connect(function()
+    myArenaCenter = nil
+    currentTarget = nil
+    teleportCount = 0
+    
+    -- Equipar faca INSTANTANEAMENTE ao spawnar
+    task.wait(0.5)
+    if AutoKillSettings.Enabled then
+        equipKnife()
+        
+        -- Salvar centro da arena IMEDIATAMENTE
+        if LocalPlayer.Character then
+            local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                myArenaCenter = root.Position
+            end
+        end
+    end
+end)
+
+-- Auto Kill Tab
+local AutoKillTab = Window:MakeTab({
+    Name = "Auto Kill",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+AutoKillTab:AddSection({Name = "⚡ AUTO KILL MEGA FAST ⚡"})
+
+AutoKillTab:AddToggle({
+    Name = "🔪 ATIVAR MASSACRE",
+    Default = false,
+    Callback = function(Value)
+        AutoKillSettings.Enabled = Value
+        
+        if Value then
+            myArenaCenter = nil
+            currentTarget = nil
+            teleportCount = 0
+            
+            -- Equipar faca IMEDIATAMENTE
+            task.spawn(function()
+                equipKnife()
+            end)
+            
+            -- Salvar arena IMEDIATAMENTE
+            if LocalPlayer.Character then
+                local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    myArenaCenter = root.Position
+                end
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "⚡ LOOPGOTO ATIVADO ⚡",
+                Content = "TELEPORTANDO E MATANDO!",
+                Time = 2
+            })
+        else
+            currentTarget = nil
+            myArenaCenter = nil
+            teleportCount = 0
+            
+            OrionLib:MakeNotification({
+                Name = "Sistema Pausado",
+                Content = "LoopGoto desativado",
+                Time = 2
+            })
+        end
+    end    
+})
+
+AutoKillTab:AddToggle({
+    Name = "👁️ Efeito Visual de TP",
+    Default = true,
+    Callback = function(Value)
+        AutoKillSettings.ShowTeleportEffect = Value
+        
+        if Value then
+            OrionLib:MakeNotification({
+                Name = "Efeito Visual Ativado",
+                Content = "Voce vera um highlight vermelho a cada TP!",
+                Time = 2
+            })
+        else
+            OrionLib:MakeNotification({
+                Name = "Efeito Visual Desativado",
+                Content = "TP invisivel (mais rapido)",
+                Time = 2
+            })
+        end
+    end    
+})
+
+AutoKillTab:AddSlider({
+    Name = "Raio da Arena",
+    Min = 50,
+    Max = 200,
+    Default = 100,
+    Increment = 10,
+    ValueName = "studs",
+    Callback = function(Value)
+        AutoKillSettings.ArenaRadius = Value
+    end    
+})
+
+AutoKillTab:AddSlider({
+    Name = "Distancia do Alvo",
+    Min = 0,
+    Max = 5,
+    Default = 2,
+    Increment = 1,
+    ValueName = "studs",
+    Callback = function(Value)
+        AutoKillSettings.FollowDistance = Value
+    end    
+})
+
+AutoKillTab:AddSection({Name = "📊 Status em Tempo Real"})
+
+AutoKillTab:AddLabel("⚡ LoopGoto: Aguardando...")
+AutoKillTab:AddLabel("📍 Teleports: 0")
+
+spawn(function()
+    while true do
+        task.wait(0.2)
+        
+        pcall(function()
+            local statusText = "⚡ LoopGoto: "
+            local tpText = "📍 Teleports: " .. tostring(teleportCount)
+            
+            if AutoKillSettings.Enabled then
+                if currentTarget and currentTarget.Character then
+                    local hum = currentTarget.Character:FindFirstChild("Humanoid")
+                    local hp = hum and math.floor(hum.Health) or 0
+                    
+                    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local targetRoot = currentTarget.Character:FindFirstChild("HumanoidRootPart")
+                    
+                    if myRoot and targetRoot then
+                        local distance = math.floor((myRoot.Position - targetRoot.Position).Magnitude)
+                        statusText = "🚀 TELEPORTANDO → " .. currentTarget.Name .. " (" .. hp .. " HP | " .. distance .. " studs)"
+                    else
+                        statusText = "🔪 MATANDO: " .. currentTarget.Name .. " (" .. hp .. " HP)"
+                    end
+                else
+                    statusText = "🔍 BUSCANDO ALVOS..."
+                end
+            else
+                statusText = "⚡ LoopGoto: Desativado"
+                tpText = "📍 Teleports: 0"
+            end
+            
+            local labels = {}
+            for _, v in pairs(AutoKillTab:GetChildren()) do
+                if v.Name == "Label" then
+                    table.insert(labels, v)
+                end
+            end
+            
+            if #labels >= 2 then
+                labels[#labels - 1].Text = statusText
+                labels[#labels].Text = tpText
+            end
+        end)
+    end
+end)
+
+AutoKillTab:AddSection({Name = "⚡ SISTEMA DE LOOPGOTO ⚡"})
+
+AutoKillTab:AddParagraph("O QUE É LOOPGOTO:", "LoopGoto = Teleporte INFINITO e INSTANTÂNEO para o alvo! Você é teleportado automaticamente para perto do inimigo em LOOP INFINITO (task.wait() = SEM DELAY)!")
+
+AutoKillTab:AddParagraph("COMO VER O TP:", "Ative o 'Efeito Visual de TP' para ver um highlight vermelho/amarelo piscando NO SEU PERSONAGEM a cada teleporte! O contador de Teleports mostra quantas vezes você já foi teleportado!")
+
+AutoKillTab:AddParagraph("POR QUE TAO RAPIDO:", "2 LOOPS fazendo LoopGoto ao mesmo tempo + task.wait() sem delay = CENTENAS de teleportes por segundo! Por isso mata tão rápido - você NUNCA sai de perto do alvo!")
+
+AutoKillTab:AddLabel("Alvo Atual: Nenhum")
+
+spawn(function()
+    while true do
+        wait(0.5)
+        
+        if currentTarget then
+            pcall(function()
+                AutoKillTab:UpdateLabel("Alvo Atual: " .. currentTarget.Name)
+            end)
+        else
+            pcall(function()
+                AutoKillTab:UpdateLabel("Alvo Atual: Nenhum")
+            end)
+        end
+    end
+end)
+
+OrionLib:Init()
+
+if LocalPlayer.Character then
+    wait(2)
+    if isInDuelsMap() then
+        inDuelsMap = true
+        detectAllies()
+        updateAllPlayers()
+    end
+end
