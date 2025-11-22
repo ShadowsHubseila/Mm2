@@ -1,0 +1,1198 @@
+local OrionLib = loadstring(game:HttpGet('https://raw.githubusercontent.com/ShadowsHubseila/lib...-/refs/heads/main/ORIONBYME.txt'))()
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+local Settings = {
+    SoloMode = false,
+    HeadEnabled = false,
+    TorsoEnabled = false,
+    BodyEnabled = false,
+    HeadSize = 10,
+    TorsoSize = 5,
+    BodySize = 3,
+    SpawnDistance = 50,
+    UpdateInterval = 1.5
+}
+
+local inDuelsMap = false
+local mySpawnPosition = nil
+local playerSpawnPositions = {}
+local confirmedAllies = {}
+local roundStarted = false
+
+local function isInDuelsMap()
+    if not LocalPlayer.Character then return false end
+    
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local duelsFolder = Workspace:FindFirstChild("DuelsMaps")
+    if not duelsFolder then return false end
+    
+    for _, map in pairs(duelsFolder:GetChildren()) do
+        if map:IsA("Model") or map:IsA("Folder") then
+            local mapParts = map:GetDescendants()
+            for _, part in pairs(mapParts) do
+                if part:IsA("BasePart") then
+                    local distance = (rootPart.Position - part.Position).Magnitude
+                    if distance < 200 then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    
+    return false
+end
+
+local function savePlayerSpawnPosition(player)
+    if not player.Character then return end
+    
+    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    if not playerSpawnPositions[player.UserId] then
+        playerSpawnPositions[player.UserId] = rootPart.Position
+    end
+end
+
+local function isSameTeamBySpawn(player)
+    if player == LocalPlayer then return true end
+    if not mySpawnPosition then return false end
+    
+    if confirmedAllies[player.UserId] then return true end
+    
+    local playerSpawn = playerSpawnPositions[player.UserId]
+    if playerSpawn then
+        local distance = (mySpawnPosition - playerSpawn).Magnitude
+        if distance <= Settings.SpawnDistance then
+            confirmedAllies[player.UserId] = true
+            return true
+        else
+            return false
+        end
+    end
+    
+    if player.Character then
+        local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local distance = (mySpawnPosition - rootPart.Position).Magnitude
+            if distance <= Settings.SpawnDistance then
+                confirmedAllies[player.UserId] = true
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+local function isSameTeamByTeam(player)
+    if player == LocalPlayer then return true end
+    
+    if LocalPlayer.Team and player.Team then
+        return LocalPlayer.Team == player.Team
+    end
+    
+    return false
+end
+
+local function isSameTeamByColor(player)
+    if player == LocalPlayer then return true end
+    if not player.Character then return false end
+    
+    local myColor = nil
+    if LocalPlayer.Character then
+        for _, partName in pairs({"Torso", "UpperTorso", "Left Arm", "Right Arm"}) do
+            local part = LocalPlayer.Character:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                local color = part.Color
+                if color.B > 0.5 and color.R < 0.4 and color.G < 0.4 then
+                    myColor = "Blue"
+                    break
+                end
+                if color.R > 0.5 and color.G < 0.4 and color.B < 0.4 then
+                    myColor = "Red"
+                    break
+                end
+            end
+        end
+    end
+    
+    if not myColor then return false end
+    
+    for _, partName in pairs({"Torso", "UpperTorso", "Left Arm", "Right Arm"}) do
+        local part = player.Character:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            local color = part.Color
+            if myColor == "Blue" and color.B > 0.5 and color.R < 0.4 and color.G < 0.4 then
+                return true
+            end
+            if myColor == "Red" and color.R > 0.5 and color.G < 0.4 and color.B < 0.4 then
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+local function isAlly(player)
+    if player == LocalPlayer then return true end
+    
+    if Settings.SoloMode then
+        return false
+    end
+    
+    if isSameTeamBySpawn(player) then
+        return true
+    end
+    
+    if isSameTeamByTeam(player) then
+        confirmedAllies[player.UserId] = true
+        return true
+    end
+    
+    if isSameTeamByColor(player) then
+        confirmedAllies[player.UserId] = true
+        return true
+    end
+    
+    return false
+end
+
+local function resetPart(part)
+    if not part then return end
+    
+    local originalSize = part:GetAttribute("OriginalSize")
+    if originalSize then
+        pcall(function()
+            part.Size = originalSize
+            
+            local mesh = part:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.Scale = Vector3.new(1, 1, 1)
+            end
+        end)
+    end
+end
+
+local function resetCharacter(character)
+    if not character then return end
+    
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            resetPart(part)
+        end
+    end
+end
+
+local function resetAll()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            resetCharacter(player.Character)
+        end
+    end
+end
+
+local function expandHead(character)
+    if not character then return end
+    if not Settings.HeadEnabled then return end
+    
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+    
+    pcall(function()
+        if not head:GetAttribute("OriginalSize") then
+            head:SetAttribute("OriginalSize", head.Size)
+        end
+        
+        local originalSize = head:GetAttribute("OriginalSize")
+        local multiplier = Settings.HeadSize
+        
+        head.Size = Vector3.new(
+            originalSize.X * multiplier,
+            originalSize.Y * multiplier,
+            originalSize.Z * multiplier
+        )
+        
+        local mesh = head:FindFirstChildOfClass("SpecialMesh")
+        if mesh then
+            mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+        end
+        
+        head.CanCollide = false
+        head.Massless = true
+    end)
+end
+
+local function expandTorso(character)
+    if not character then return end
+    if not Settings.TorsoEnabled then return end
+    
+    local parts = {
+        character:FindFirstChild("UpperTorso"),
+        character:FindFirstChild("LowerTorso"),
+        character:FindFirstChild("Torso")
+    }
+    
+    for _, part in pairs(parts) do
+        if part then
+            pcall(function()
+                if not part:GetAttribute("OriginalSize") then
+                    part:SetAttribute("OriginalSize", part.Size)
+                end
+                
+                local originalSize = part:GetAttribute("OriginalSize")
+                local multiplier = Settings.TorsoSize
+                
+                part.Size = Vector3.new(
+                    originalSize.X * multiplier,
+                    originalSize.Y * multiplier,
+                    originalSize.Z * multiplier
+                )
+                
+                local mesh = part:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+                end
+                
+                part.CanCollide = false
+                part.Massless = true
+            end)
+        end
+    end
+end
+
+local function expandBody(character)
+    if not character then return end
+    if not Settings.BodyEnabled then return end
+    
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Name ~= "Head" then
+            pcall(function()
+                if not part:GetAttribute("OriginalSize") then
+                    part:SetAttribute("OriginalSize", part.Size)
+                end
+                
+                local originalSize = part:GetAttribute("OriginalSize")
+                local multiplier = Settings.BodySize
+                
+                part.Size = Vector3.new(
+                    originalSize.X * multiplier,
+                    originalSize.Y * multiplier,
+                    originalSize.Z * multiplier
+                )
+                
+                local mesh = part:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh.Scale = Vector3.new(multiplier, multiplier, multiplier)
+                end
+                
+                part.CanCollide = false
+                part.Massless = true
+            end)
+        end
+    end
+end
+
+local function detectAllies()
+    if roundStarted then return end
+    if Settings.SoloMode then 
+        roundStarted = true
+        return 
+    end
+    
+    if LocalPlayer.Character then
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            mySpawnPosition = rootPart.Position
+            playerSpawnPositions[LocalPlayer.UserId] = mySpawnPosition
+        end
+    end
+    
+    wait(2)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            savePlayerSpawnPosition(player)
+        end
+    end
+    
+    wait(1)
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            isAlly(player)
+        end
+    end
+    
+    roundStarted = true
+end
+
+local function updateAllPlayers()
+    if not inDuelsMap then return end
+    
+    if Settings.SoloMode then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                if Settings.HeadEnabled then
+                    expandHead(player.Character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(player.Character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(player.Character)
+                end
+            end
+        end
+        return
+    end
+    
+    if not roundStarted then return end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if not isAlly(player) then
+                if Settings.HeadEnabled then
+                    expandHead(player.Character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(player.Character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(player.Character)
+                end
+            end
+        end
+    end
+end
+
+local function resetState()
+    inDuelsMap = false
+    roundStarted = false
+    mySpawnPosition = nil
+    playerSpawnPositions = {}
+    confirmedAllies = {}
+    resetAll()
+end
+
+spawn(function()
+    while true do
+        wait(2)
+        
+        local wasInDuels = inDuelsMap
+        local nowInDuels = isInDuelsMap()
+        
+        if wasInDuels and not nowInDuels then
+            resetState()
+        end
+        
+        if not wasInDuels and nowInDuels then
+            inDuelsMap = true
+            roundStarted = false
+            wait(0.5)
+            detectAllies()
+            wait(1)
+            updateAllPlayers()
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    character:WaitForChild("Head")
+    wait(1)
+    
+    if isInDuelsMap() then
+        inDuelsMap = true
+        roundStarted = false
+        detectAllies()
+        updateAllPlayers()
+    end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        character:WaitForChild("Head")
+        wait(1.5)
+        
+        if inDuelsMap then
+            if Settings.SoloMode or (roundStarted and not isAlly(player)) then
+                if Settings.HeadEnabled then
+                    expandHead(character)
+                end
+                
+                if Settings.TorsoEnabled then
+                    expandTorso(character)
+                end
+                
+                if Settings.BodyEnabled then
+                    expandBody(character)
+                end
+            end
+        end
+    end)
+end)
+
+spawn(function()
+    while true do
+        wait(Settings.UpdateInterval)
+        
+        if inDuelsMap then
+            updateAllPlayers()
+        end
+    end
+end)
+
+local Window = OrionLib:MakeWindow({
+    Name = "Shad0ws Hub",
+    HidePremium = false,
+    SaveConfig = false,
+    IntroEnabled = false
+})
+
+local AimbotCorpoTab = Window:MakeTab({
+    Name = "Aimbot Corpo",
+    Icon = "rbxassetid://13577838989",
+    PremiumOnly = false
+})
+
+AimbotCorpoTab:AddSection({Name = "Modo de Jogo"})
+
+AimbotCorpoTab:AddSection({Name = "Configuracoes"})
+
+AimbotCorpoTab:AddToggle({
+    Name = "Aumentar Cabeca",
+    Default = false,
+    Callback = function(Value)
+        Settings.HeadEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Cabeca Ativada",
+                Content = "Cabecas aumentadas",
+                Time = 2
+            })
+        else
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    local head = player.Character:FindFirstChild("Head")
+                    if head then
+                        resetPart(head)
+                    end
+                end
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Cabeca Desativada",
+                Content = "Cabecas resetadas",
+                Time = 2
+            })
+        end
+    end    
+})
+
+AimbotCorpoTab:AddSlider({
+    Name = "Tamanho da Cabeca",
+    Min = 2,
+    Max = 30,
+    Default = 10,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.HeadSize = Value
+        
+        if Settings.HeadEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+AimbotCorpoTab:AddSection({Name = ""})
+
+AimbotCorpoTab:AddToggle({
+    Name = "Aumentar Tronco",
+    Default = false,
+    Callback = function(Value)
+        Settings.TorsoEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Tronco Ativado",
+                Content = "Troncos aumentados",
+                Time = 2
+            })
+        else
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    for _, partName in pairs({"Torso", "UpperTorso", "LowerTorso"}) do
+                        local part = player.Character:FindFirstChild(partName)
+                        if part then
+                            resetPart(part)
+                        end
+                    end
+                end
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Tronco Desativado",
+                Content = "Troncos resetados",
+                Time = 2
+            })
+        end
+    end    
+})
+
+AimbotCorpoTab:AddSlider({
+    Name = "Tamanho do Tronco",
+    Min = 2,
+    Max = 20,
+    Default = 5,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.TorsoSize = Value
+        
+        if Settings.TorsoEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+AimbotCorpoTab:AddSection({Name = ""})
+
+AimbotCorpoTab:AddToggle({
+    Name = "Aumentar Corpo Inteiro",
+    Default = false,
+    Callback = function(Value)
+        Settings.BodyEnabled = Value
+        
+        if Value then
+            if inDuelsMap then
+                updateAllPlayers()
+            end
+            
+            OrionLib:MakeNotification({
+                Name = "Corpo Ativado",
+                Content = "Corpos aumentados",
+                Time = 2
+            })
+        else
+            resetAll()
+            
+            OrionLib:MakeNotification({
+                Name = "Corpo Desativado",
+                Content = "Corpos resetados",
+                Time = 2
+            })
+        end
+    end    
+})
+
+AimbotCorpoTab:AddSlider({
+    Name = "Tamanho do Corpo",
+    Min = 2,
+    Max = 15,
+    Default = 3,
+    Increment = 1,
+    ValueName = "x",
+    Callback = function(Value)
+        Settings.BodySize = Value
+        
+        if Settings.BodyEnabled and inDuelsMap then
+            updateAllPlayers()
+        end
+    end    
+})
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local Settings = {
+    BringEnabled = false,
+    AutoKillEnabled = false,
+    VoidKillEnabled = false,
+    SpawnDistance = 70,
+    BringDistance = 5,
+    MapCheckDistance = 300,
+    VoidDepth = -1000,
+    DetectionDelay = 1
+}
+
+local mySpawnPosition = nil
+local confirmedEnemies = {}
+local currentMap = nil
+local savedMapPosition = nil
+local voidFloor = nil
+local matchesPlayed = 0
+local detectionComplete = false
+local hasDetectedThisRound = false
+
+local VOID_POSITION = Vector3.new(0, -1000, 0)
+
+local LOBBY_POSITIONS = {
+    Vector3.new(106, 49, -1141),
+    Vector3.new(104, 49, -1173),
+    Vector3.new(123, 49, -1160),
+    Vector3.new(119, 49, -1172)
+}
+
+local function setupAntiVoid()
+    workspace.FallenPartsDestroyHeight = 0/0
+    
+    RunService.Heartbeat:Connect(function()
+        if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum.MaxHealth = math.huge
+                hum.Health = math.huge
+            end
+        end
+    end)
+end
+
+local function createVoidFloor()
+    if voidFloor and voidFloor.Parent then return voidFloor end
+    
+    voidFloor = Instance.new("Part")
+    voidFloor.Name = "VoidFloor"
+    voidFloor.Size = Vector3.new(100000, 10, 100000)
+    voidFloor.Position = Vector3.new(0, Settings.VoidDepth - 10, 0)
+    voidFloor.Anchored = true
+    voidFloor.CanCollide = true
+    voidFloor.Transparency = 0
+    voidFloor.BrickColor = BrickColor.new("Dark stone grey")
+    voidFloor.Material = Enum.Material.Concrete
+    voidFloor.Parent = Workspace
+    
+    return voidFloor
+end
+
+local function removeVoidFloor()
+    if voidFloor then
+        voidFloor:Destroy()
+        voidFloor = nil
+    end
+end
+
+local function teleportToVoid()
+    if not LocalPlayer.Character then return end
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    VOID_POSITION = Vector3.new(0, Settings.VoidDepth, 0)
+    myRoot.CFrame = CFrame.new(VOID_POSITION)
+    
+    task.wait(0.05)
+    if myRoot then
+        myRoot.CFrame = CFrame.new(VOID_POSITION)
+        myRoot.Velocity = Vector3.new(0, 0, 0)
+        myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end
+
+local function isInVoid()
+    if not LocalPlayer.Character then return false end
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return false end
+    return myRoot.Position.Y < Settings.VoidDepth + 100
+end
+
+local function getKnife()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local char = LocalPlayer.Character
+    
+    if char then
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") and tool.Name:lower():find("knife") then
+                return tool
+            end
+        end
+    end
+    
+    if backpack then
+        for _, tool in pairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") and tool.Name:lower():find("knife") then
+                return tool
+            end
+        end
+    end
+    return nil
+end
+
+local function equipKnife()
+    local knife = getKnife()
+    if knife and knife.Parent ~= LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then
+            hum:EquipTool(knife)
+        end
+    end
+    return knife
+end
+
+local function attackWithKnife(knife)
+    if not knife then return end
+    pcall(function()
+        knife:Activate()
+        for _, v in pairs(knife:GetDescendants()) do
+            if v:IsA("RemoteEvent") then
+                v:FireServer()
+            end
+        end
+    end)
+end
+
+local function getCurrentDuelsMap()
+    if not LocalPlayer.Character then return nil end
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return nil end
+    
+    if rootPart.Position.Y < Settings.VoidDepth + 100 then
+        return currentMap
+    end
+    
+    local duelsFolder = Workspace:FindFirstChild("DuelsMaps")
+    if not duelsFolder then return nil end
+    
+    for _, map in pairs(duelsFolder:GetChildren()) do
+        if map:IsA("Model") or map:IsA("Folder") then
+            for _, part in pairs(map:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if (rootPart.Position - part.Position).Magnitude < Settings.MapCheckDistance then
+                        return map
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function isInDuelsMap()
+    return getCurrentDuelsMap() ~= nil
+end
+
+local function isPlayerInSameMap(player)
+    if not currentMap then return false end
+    if not player.Character then return false end
+    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    for _, part in pairs(currentMap:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if (rootPart.Position - part.Position).Magnitude < Settings.MapCheckDistance then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function detectEnemies()
+    if hasDetectedThisRound then return true end
+    
+    currentMap = getCurrentDuelsMap()
+    if not currentMap then return false end
+    
+    if LocalPlayer.Character and not isInVoid() then
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            mySpawnPosition = rootPart.Position
+            savedMapPosition = rootPart.CFrame
+        end
+    end
+    
+    if not mySpawnPosition then return false end
+    
+    confirmedEnemies = {}
+    local playersFound = {}
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            if isPlayerInSameMap(player) then
+                local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+                if rootPart then
+                    local distance = (mySpawnPosition - rootPart.Position).Magnitude
+                    table.insert(playersFound, {
+                        player = player,
+                        distance = distance
+                    })
+                end
+            end
+        end
+    end
+    
+    if #playersFound == 0 then return false end
+    
+    table.sort(playersFound, function(a, b) return a.distance > b.distance end)
+    
+    for _, data in pairs(playersFound) do
+        if data.distance > Settings.SpawnDistance then
+            confirmedEnemies[data.player.UserId] = true
+        end
+    end
+    
+    local enemyCount = 0
+    for _ in pairs(confirmedEnemies) do
+        enemyCount = enemyCount + 1
+    end
+    
+    if enemyCount > 0 then
+        detectionComplete = true
+        hasDetectedThisRound = true
+        return true
+    end
+    
+    return false
+end
+
+local function getClosestEnemy()
+    local closest = nil
+    local closestDist = math.huge
+    
+    for userId, _ in pairs(confirmedEnemies) do
+        local player = Players:GetPlayerByUserId(userId)
+        if player and player.Character then
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            local hum = player.Character:FindFirstChild("Humanoid")
+            
+            if root and hum and hum.Health > 0 then
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    local dist = (myRoot.Position - root.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closest = player
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function isRoundOver()
+    if not detectionComplete then return false end
+    
+    for userId, _ in pairs(confirmedEnemies) do
+        local player = Players:GetPlayerByUserId(userId)
+        if player and player.Character then
+            local hum = player.Character:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 then
+                return false
+            end
+        end
+    end
+    
+    return true
+end
+
+local function bringEnemies()
+    if not Settings.BringEnabled then return end
+    if not LocalPlayer.Character then return end
+    if not detectionComplete then return end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    local enemy = getClosestEnemy()
+    if not enemy or not enemy.Character then return end
+    
+    local enemyRoot = enemy.Character:FindFirstChild("HumanoidRootPart")
+    if not enemyRoot then return end
+    
+    local lookVector = myRoot.CFrame.LookVector
+    local targetPos = myRoot.Position + (lookVector * Settings.BringDistance)
+    
+    pcall(function()
+        enemyRoot.CFrame = CFrame.new(targetPos)
+        enemyRoot.Velocity = Vector3.new(0, 0, 0)
+        enemyRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end)
+end
+
+local function autoKill()
+    if not Settings.AutoKillEnabled then return end
+    if not LocalPlayer.Character then return end
+    if not detectionComplete then return end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    local knife = equipKnife()
+    if not knife then return end
+    
+    local enemy = getClosestEnemy()
+    if not enemy or not enemy.Character then return end
+    
+    local enemyRoot = enemy.Character:FindFirstChild("HumanoidRootPart")
+    if not enemyRoot then return end
+    
+    local lookVector = myRoot.CFrame.LookVector
+    local targetPos = myRoot.Position + (lookVector * 1)
+    
+    pcall(function()
+        enemyRoot.CFrame = CFrame.new(targetPos)
+        enemyRoot.Velocity = Vector3.new(0, 0, 0)
+    end)
+    attackWithKnife(knife)
+end
+
+local function voidBringEnemy()
+    if not Settings.VoidKillEnabled then return end
+    if not LocalPlayer.Character then return end
+    if not detectionComplete then return end
+    if not isInVoid() then return end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    equipKnife()
+    
+    local enemy = getClosestEnemy()
+    if not enemy or not enemy.Character then return end
+    
+    local enemyRoot = enemy.Character:FindFirstChild("HumanoidRootPart")
+    local enemyHum = enemy.Character:FindFirstChild("Humanoid")
+    if not enemyRoot or not enemyHum or enemyHum.Health <= 0 then return end
+    
+    for i = 1, 3 do
+        local lookVector = myRoot.CFrame.LookVector
+        local enemyPos = myRoot.Position + (lookVector * 2)
+        
+        pcall(function()
+            enemyRoot.CFrame = CFrame.new(enemyPos)
+            enemyRoot.Velocity = Vector3.new(0, 0, 0)
+            enemyRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            enemyRoot.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end)
+    end
+    
+    local knife = getKnife()
+    if knife then
+        attackWithKnife(knife)
+    end
+end
+
+local function returnFromVoid()
+    if savedMapPosition and LocalPlayer.Character then
+        local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if myRoot then
+            myRoot.CFrame = savedMapPosition
+        end
+    end
+    removeVoidFloor()
+end
+
+local function returnToLobby()
+    if not LocalPlayer.Character then return end
+    
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    local randomPos = LOBBY_POSITIONS[math.random(1, #LOBBY_POSITIONS)]
+    myRoot.CFrame = CFrame.new(randomPos)
+    
+    removeVoidFloor()
+end
+
+local function resetRound()
+    detectionComplete = false
+    hasDetectedThisRound = false
+    mySpawnPosition = nil
+    confirmedEnemies = {}
+    currentMap = nil
+    savedMapPosition = nil
+end
+
+setupAntiVoid()
+
+spawn(function()
+    while true do
+        task.wait(0.05)
+        
+        if Settings.VoidKillEnabled then
+            if not voidFloor or not voidFloor.Parent then
+                createVoidFloor()
+            end
+            
+            if LocalPlayer.Character then
+                local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    
+                    if myRoot.Position.Y > Settings.VoidDepth + 100 then
+                        
+                        if not detectionComplete and not hasDetectedThisRound then
+                            local mapNow = getCurrentDuelsMap()
+                            if mapNow then
+                                task.wait(Settings.DetectionDelay)
+                                detectEnemies()
+                            end
+                        end
+                        
+                        if detectionComplete and hasDetectedThisRound then
+                            savedMapPosition = myRoot.CFrame
+                            
+                            for i = 1, 5 do
+                                teleportToVoid()
+                                task.wait(0.05)
+                            end
+                        end
+                        
+                    else
+                        
+                        if detectionComplete and isRoundOver() then
+                            matchesPlayed = matchesPlayed + 1
+                            
+                            if matchesPlayed >= 5 then
+                                task.wait(2)
+                                Settings.VoidKillEnabled = false
+                                returnToLobby()
+                                resetRound()
+                                matchesPlayed = 0
+                            else
+                                resetRound()
+                                task.wait(3)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    character:WaitForChild("HumanoidRootPart")
+    resetRound()
+end)
+
+RunService.Heartbeat:Connect(function()
+    if Settings.VoidKillEnabled and detectionComplete then
+        voidBringEnemy()
+    end
+    
+    if Settings.BringEnabled and detectionComplete then
+        bringEnemies()
+    end
+    
+    if Settings.AutoKillEnabled and detectionComplete then
+        autoKill()
+    end
+end)
+
+
+local MainTab = Window:MakeTab({
+    Name = "Kill",
+    Icon = "rbxassetid://129000779735197",
+    PremiumOnly = false
+})
+
+MainTab:AddSection({Name = "Kill Funções"})
+
+MainTab:AddToggle({
+    Name = "Kill Bring",
+    Default = false,
+    Callback = function(Value)
+        Settings.BringEnabled = Value
+        if Value and not detectionComplete then
+            detectEnemies()
+        end
+    end    
+})
+
+MainTab:AddSlider({
+    Name = "Distancia na Frente",
+    Min = 2,
+    Max = 15,
+    Default = 5,
+    Increment = 1,
+    ValueName = " studs",
+    Callback = function(Value)
+        Settings.BringDistance = Value
+    end    
+})
+
+MainTab:AddSection({Name = "Auto Kill"})
+
+MainTab:AddToggle({
+    Name = "Auto Kill Faca / Knife",
+    Default = false,
+    Callback = function(Value)
+        Settings.AutoKillEnabled = Value
+        if Value and not detectionComplete then
+            detectEnemies()
+        end
+    end    
+})
+
+MainTab:AddSection({Name = "Void Kill"})
+
+MainTab:AddToggle({
+    Name = "Void Kill",
+    Default = false,
+    Callback = function(Value)
+        Settings.VoidKillEnabled = Value
+        if Value then
+            matchesPlayed = 0
+            resetRound()
+            createVoidFloor()
+            
+            if isInDuelsMap() then
+                task.wait(Settings.DetectionDelay)
+                detectEnemies()
+                
+                if detectionComplete then
+                    task.wait(0.5)
+                    if LocalPlayer.Character then
+                        local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if myRoot then
+                            savedMapPosition = myRoot.CFrame
+                            for i = 1, 5 do
+                                teleportToVoid()
+                                task.wait(0.05)
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            returnFromVoid()
+            resetRound()
+        end
+    end    
+})
+
+MainTab:AddSlider({
+    Name = "Profundidade do Void",
+    Min = 500,
+    Max = 3000,
+    Default = 1000,
+    Increment = 100,
+    ValueName = " studs",
+    Callback = function(Value)
+        Settings.VoidDepth = -Value
+        VOID_POSITION = Vector3.new(0, Settings.VoidDepth, 0)
+    end    
+})
+
+OrionLib:Init()
